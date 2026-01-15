@@ -123,6 +123,8 @@ int main(void)
     while (!WindowShouldClose()) {
         float dt      = GetFrameTime();
         Vector2 mouse = GetMousePosition();
+        int monitorFrameRate = GetMonitorRefreshRate(GetCurrentMonitor());
+        SetTargetFPS(monitorFrameRate);
 
         // apply render target resize
         if (GetScreenWidth() != lastScreenWidth || GetScreenHeight() != lastScreenHeight) {
