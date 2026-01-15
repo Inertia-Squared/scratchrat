@@ -34,11 +34,6 @@ Just run the program and use your mouse to draw.
 Edit the source and rebuild.
 
 ## Building
-
-### Nix
-Clone the repo and run `nix build`, or just `nix run github:nthnd/scratchrat`
-
-### Without NIX
 1. Clone the repo.
 2. Make sure you have Raylib version > 5.0
 3. cd into the repo.
