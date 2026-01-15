@@ -4,6 +4,15 @@
 
 #include <raylib.h>
 #include <raymath.h>
+#include <string.h>
+#include <time.h>
+#include <sys/time.h>
+#include <sys/stat.h>
+
+#include <unistd.h>
+#include <sys/types.h>
+#include <pwd.h>
+#include "clip_wrapper.h"
 
 #define DEFAULT_WINDOW_WIDTH  800
 #define DEFAULT_WINDOW_HEIGHT 600
@@ -46,6 +55,7 @@ typedef struct WorldState {
     int capacity_strokes;
 
     bool drawing;
+    char* working_dir;
 } WorldState;
 
 void unloadWorldState(WorldState* w)
@@ -94,6 +104,52 @@ void addPointToStroke(WorldState* w, Vector2 p)
     s->points[s->n_points++] = p;
 }
 
+bool ensureAppDirectory(const char* path)
+{
+    char testDir[512];
+    snprintf(testDir, 512, "%s/scratchrat", path);
+    printf("Testdir: %s\n", testDir);
+    if (!DirectoryExists(testDir)) {
+        return mkdir(testDir, 0755);
+    }
+    return true;
+}
+
+bool GetHomeDir(WorldState *w)
+{
+    const struct passwd *pw = getpwuid(getuid());
+    w->working_dir = pw->pw_dir;
+
+
+    char testDir[512];
+    snprintf(testDir, 512, "%s/Pictures", w->working_dir);
+    if (DirectoryExists(testDir)) {
+        w->working_dir = malloc(strlen(testDir) + 1);
+        strcpy(w->working_dir, testDir);
+        ensureAppDirectory(testDir);
+    } else {
+        ensureAppDirectory(w->working_dir);
+    }
+
+    if (w->working_dir != NULL) return true;
+    return false;
+}
+
+void saveScreenshot(WorldState *w)
+{
+    Image screenshot = LoadImageFromScreen();
+    clip_set_image_rgba(screenshot.data, screenshot.width, screenshot.height);
+    char filename[512];
+    struct timeval dt;
+    gettimeofday(&dt, NULL);
+    printf("Getting file name...\n");
+    long long milliseconds = dt.tv_sec * 1000LL + dt.tv_usec / 1000;
+
+    snprintf(filename, 512, "%s/scratchrat/scratchrat-%lld.png", w->working_dir, milliseconds);
+    printf("Exporting scratchpad to %s\n", filename);
+    ExportImage(screenshot, filename);
+}
+
 int main(void)
 {
     SetTraceLogLevel(LOG_WARNING);
@@ -116,11 +172,18 @@ int main(void)
         .n_strokes        = 0,
         .capacity_strokes = INIT_STROKES_CAPACITY,
         .drawing          = false,
+        .working_dir = "",
     };
+    GetHomeDir(&w);
+    printf("Save Path: %s\n", w.working_dir);
 
     HideCursor();
-
+    bool shouldScreenshot = false;
+    Vector2 lastMousePosition = {0, 0};
+    int frameCount = 0;
+    int lastActiveFrame = 0;
     while (!WindowShouldClose()) {
+        frameCount++;
         float dt      = GetFrameTime();
         Vector2 mouse = GetMousePosition();
         int monitorFrameRate = GetMonitorRefreshRate(GetCurrentMonitor());
@@ -166,36 +229,55 @@ int main(void)
         }
 
         // check undo
-        if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_Z)) {
-            if (w.n_strokes >= 1) {
-                printf("Undid stroke: id=%d\n", w.n_strokes - 1);
-                w.n_strokes -= 1;
+        if (IsKeyDown(KEY_LEFT_CONTROL)) {
+            if (IsKeyPressed(KEY_Z)) {
+                if (w.n_strokes >= 1) {
+                    printf("Undid stroke: id=%d\n", w.n_strokes - 1);
+                    w.n_strokes -= 1;
+                }
+            }
+
+            if (IsKeyPressed(KEY_S)) {
+                shouldScreenshot = true;
             }
         }
 
-        BeginTextureMode(target);
-        ClearBackground(DEFAULT_BG);
-        DrawTextureV(cursorTexture, mouse, WHITE);
+        if (mouse.x != lastMousePosition.x && mouse.y != lastMousePosition.y) lastActiveFrame = frameCount;
+        if (frameCount - lastActiveFrame < GetFPS() * 2) {
+            BeginTextureMode(target);
+            ClearBackground(DEFAULT_BG);
 
-        BeginMode2D(c);
+            BeginMode2D(c);
 
-        for (int i = 0; i < w.n_strokes; ++i) {
-            Stroke s = w.strokes[i];
-            DrawSplineBasis(s.points, s.n_points, s.radius, s.color);
+            for (int i = 0; i < w.n_strokes; ++i) {
+                Stroke s = w.strokes[i];
+                DrawSplineBasis(s.points, s.n_points, s.radius, s.color);
+            }
+
+            EndMode2D();
+            lastMousePosition = GetMousePosition();
+            DrawTextureV(cursorTexture, mouse, WHITE);
+
+            if (shouldScreenshot) {
+                saveScreenshot(&w);
+                shouldScreenshot = false;
+            }
+
+            EndTextureMode();
+
+            BeginDrawing();
+            ClearBackground(PINK);
+            DrawTextureRec(
+                target.texture,
+                (Rectangle) {
+                    0, 0, (float)target.texture.width, -(float)target.texture.height },
+                (Vector2) { 0, 0 },
+                WHITE);
+            EndDrawing();
+        } else {
+             lastMousePosition = GetMousePosition();
+             EndDrawing();
         }
-
-        EndMode2D();
-        EndTextureMode();
-
-        BeginDrawing();
-        ClearBackground(PINK);
-        DrawTextureRec(
-            target.texture,
-            (Rectangle) {
-                0, 0, (float)target.texture.width, -(float)target.texture.height },
-            (Vector2) { 0, 0 },
-            WHITE);
-        EndDrawing();
     }
 
     unloadWorldState(&w);
